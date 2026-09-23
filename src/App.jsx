@@ -67,6 +67,8 @@ function App() {
 
   const [accessToken, setAccessToken] = useState(null)
   const [driveSongs, setDriveSongs] = useState([])
+  const [driveFolders, setDriveFolders] = useState([])
+  const [selectedFolder, setSelectedFolder] = useState(null)
   const [loadingDrive, setLoadingDrive] = useState(false)
   const [driveError, setDriveError] = useState("")
 
@@ -105,74 +107,145 @@ function App() {
   // -----------------------------
 
   useEffect(() => {
-    if (!accessToken) return
+  if (!accessToken) return
 
-    const fetchDriveSongs = async () => {
-      setLoadingDrive(true)
-      setDriveError("")
+  const fetchDriveContent = async () => {
+    setLoadingDrive(true)
+    setDriveError("")
 
-      try {
-        const query = encodeURIComponent(
-          `'${DRIVE_FOLDER_ID}' in parents and trashed = false`
-        )
+    try {
+      // Get folders inside My Music
+      const folderQuery = encodeURIComponent(
+        `'${DRIVE_FOLDER_ID}' in parents and trashed = false and mimeType = 'application/vnd.google-apps.folder'`
+      )
 
-        const url =
-          `https://www.googleapis.com/drive/v3/files` +
-          `?q=${query}` +
-          `&fields=files(id,name,mimeType,size,modifiedTime)` +
-          `&orderBy=name`
-
-        const response = await fetch(url, {
+      const folderResponse = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${folderQuery}&fields=files(id,name)&orderBy=name`,
+        {
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
-        })
-
-        if (!response.ok) {
-          const errorText = await response.text()
-          console.error(errorText)
-          throw new Error("Could not access Google Drive")
         }
+      )
 
-        const data = await response.json()
-
-        const audioFiles = (data.files || []).filter((file) => {
-          const name = file.name.toLowerCase()
-
-          return (
-            file.mimeType?.startsWith("audio/") ||
-            name.endsWith(".mp3") ||
-            name.endsWith(".m4a") ||
-            name.endsWith(".wav") ||
-            name.endsWith(".flac") ||
-            name.endsWith(".ogg")
-          )
-        })
-
-        const formattedSongs = audioFiles.map((file) => ({
-          id: file.id,
-          title: file.name.replace(/\.[^/.]+$/, ""),
-          artist: "Google Drive",
-          album: "My Music",
-          driveId: file.id,
-          mimeType: file.mimeType,
-        }))
-
-        setDriveSongs(formattedSongs)
-        setCurrentSongIndex(0)
-      } catch (error) {
-        console.error(error)
-        setDriveError(
-          "Drive songs load nahi ho paaye. Console check karo."
-        )
-      } finally {
-        setLoadingDrive(false)
+      if (!folderResponse.ok) {
+        throw new Error("Could not load Drive folders")
       }
+
+      const folderData = await folderResponse.json()
+
+      setDriveFolders(folderData.files || [])
+
+      // Get audio files directly inside My Music
+      const songQuery = encodeURIComponent(
+        `'${DRIVE_FOLDER_ID}' in parents and trashed = false`
+      )
+
+      const songResponse = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${songQuery}&fields=files(id,name,mimeType,size,modifiedTime)&orderBy=name`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      )
+
+      if (!songResponse.ok) {
+        throw new Error("Could not load Drive songs")
+      }
+
+      const songData = await songResponse.json()
+
+      const audioFiles = (songData.files || []).filter((file) => {
+        const name = file.name.toLowerCase()
+
+        return (
+          file.mimeType?.startsWith("audio/") ||
+          name.endsWith(".mp3") ||
+          name.endsWith(".m4a") ||
+          name.endsWith(".wav") ||
+          name.endsWith(".flac") ||
+          name.endsWith(".ogg")
+        )
+      })
+
+      const formattedSongs = audioFiles.map((file) => ({
+      id: file.id,
+      title: file.name.replace(/\.[^/.]+$/, ""),
+      artist: "Google Drive",
+      album: "My Music",
+      driveId: file.id,
+      mimeType: file.mimeType,
+      }))
+
+      setDriveSongs(formattedSongs)
+      setCurrentSongIndex(0)
+    } catch (error) {
+      console.error(error)
+      setDriveError("Drive content load nahi ho paaya.")
+    } finally {
+      setLoadingDrive(false)
+    }
+  }
+
+  fetchDriveContent()
+}, [accessToken])
+
+const fetchFolderSongs = async (folder) => {
+  setLoadingDrive(true)
+  setDriveError("")
+
+  try {
+    const query = encodeURIComponent(
+      `'${folder.id}' in parents and trashed = false`
+    )
+
+    const response = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,mimeType,size,modifiedTime)&orderBy=name`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    )
+
+    if (!response.ok) {
+      throw new Error("Could not load playlist")
     }
 
-    fetchDriveSongs()
-  }, [accessToken])
+    const data = await response.json()
 
+    const audioFiles = (data.files || []).filter((file) => {
+      const name = file.name.toLowerCase()
+
+      return (
+        file.mimeType?.startsWith("audio/") ||
+        name.endsWith(".mp3") ||
+        name.endsWith(".m4a") ||
+        name.endsWith(".wav") ||
+        name.endsWith(".flac") ||
+        name.endsWith(".ogg")
+      )
+    })
+
+    const formattedSongs = audioFiles.map((file) => ({
+      id: file.id,
+      title: file.name.replace(/\.[^/.]+$/, ""),
+      artist: "Google Drive",
+      album: folder.name,
+      driveId: file.id,
+      mimeType: file.mimeType,
+    }))
+
+    setDriveSongs(formattedSongs)
+    setCurrentSongIndex(0)
+  } catch (error) {
+    console.error(error)
+    setDriveError("Playlist songs load nahi ho paaye.")
+  } finally {
+    setLoadingDrive(false)
+  }
+}
   // -----------------------------
   // DOWNLOAD / PLAY DRIVE SONG
   // -----------------------------
@@ -455,7 +528,55 @@ function App() {
             {driveError}
           </div>
         )}
+        {/* PLAYLIST / GENRE FOLDERS */}
 
+{accessToken && driveFolders.length > 0 && (
+  <section className="mb-6">
+    <div className="mb-3 flex items-center justify-between">
+      <h2 className="text-lg font-semibold">
+        Playlists
+      </h2>
+
+      {selectedFolder && (
+        <button
+          onClick={() => setSelectedFolder(null)}
+          className="text-sm text-zinc-400"
+        >
+          Show All
+        </button>
+      )}
+    </div>
+
+    <div className="flex gap-3 overflow-x-auto pb-2">
+      {driveFolders.map((folder) => (
+        <button
+          key={folder.id}
+          onClick={() => {
+          setSelectedFolder(folder)
+          fetchFolderSongs(folder)
+          }}
+          className={`min-w-[120px] rounded-2xl p-4 text-left ${
+            selectedFolder?.id === folder.id
+              ? "bg-white text-black"
+              : "bg-zinc-900 text-white"
+          }`}
+        >
+          <div className="mb-3 text-3xl">
+            🎵
+          </div>
+
+          <p className="truncate font-semibold">
+            {folder.name}
+          </p>
+
+          <p className="mt-1 text-xs text-zinc-500">
+            Playlist
+          </p>
+        </button>
+      ))}
+    </div>
+  </section>
+)}
         {/* SEARCH */}
 
         <div className="mb-5">
