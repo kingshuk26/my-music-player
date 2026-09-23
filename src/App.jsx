@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { openDB } from "idb"
 import { useGoogleLogin } from "@react-oauth/google"
 import {
   Play,
@@ -38,6 +39,18 @@ const localSongs = [
 ]
 
 const DRIVE_FOLDER_ID = import.meta.env.VITE_DRIVE_FOLDER_ID
+
+const MUSIC_DB_NAME = "my-music-player"
+const MUSIC_STORE_NAME = "songs"
+
+const getMusicDB = () =>
+  openDB(MUSIC_DB_NAME, 1, {
+    upgrade(db) {
+      if (!db.objectStoreNames.contains(MUSIC_STORE_NAME)) {
+        db.createObjectStore(MUSIC_STORE_NAME)
+      }
+    },
+  })
 
 const formatTime = (time) => {
   if (!Number.isFinite(time)) return "0:00"
@@ -165,74 +178,89 @@ function App() {
   // -----------------------------
 
   const getDriveAudioUrl = async (song) => {
-    if (objectUrlsRef.current[song.id]) {
-      return objectUrlsRef.current[song.id]
-    }
+  const db = await getMusicDB()
 
-    const response = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${song.driveId}?alt=media`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      }
-    )
+  // Check IndexedDB cache first
+  const cachedBlob = await db.get(MUSIC_STORE_NAME, song.id)
 
-    if (!response.ok) {
-      throw new Error("Song download failed")
-    }
+  if (cachedBlob) {
+    console.log("Playing from cache:", song.title)
 
-    const blob = await response.blob()
-    const objectUrl = URL.createObjectURL(blob)
-
+    const objectUrl = URL.createObjectURL(cachedBlob)
     objectUrlsRef.current[song.id] = objectUrl
 
     return objectUrl
   }
+
+  console.log("Downloading from Drive:", song.title)
+
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${song.driveId}?alt=media`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    }
+  )
+
+  if (!response.ok) {
+    throw new Error("Song download failed")
+  }
+
+  const blob = await response.blob()
+
+  // Save downloaded song to IndexedDB
+  await db.put(MUSIC_STORE_NAME, blob, song.id)
+
+  const objectUrl = URL.createObjectURL(blob)
+  objectUrlsRef.current[song.id] = objectUrl
+
+  return objectUrl
+}
 
   // -----------------------------
   // LOAD CURRENT SONG
   // -----------------------------
 
   useEffect(() => {
-    const audio = audioRef.current
+  const audio = audioRef.current
 
-    if (!audio || !currentSong) return
+  if (!audio || !currentSong) return
 
-    let cancelled = false
+  let cancelled = false
 
-    const loadSong = async () => {
-      setCurrentTime(0)
-      setDuration(0)
+  const loadSong = async () => {
+    setCurrentTime(0)
+    setDuration(0)
 
-      try {
-        let src = currentSong.src
+    try {
+      let src = currentSong.src
 
-        if (currentSong.driveId) {
-          src = await getDriveAudioUrl(currentSong)
-        }
-
-        if (cancelled) return
-
-        audio.src = src
-        audio.volume = volume
-        audio.load()
-
-        if (isPlaying) {
-          await audio.play()
-        }
-      } catch (error) {
-        console.error("Playback failed:", error)
-        setIsPlaying(false)
+      if (currentSong.driveId) {
+        src = await getDriveAudioUrl(currentSong)
       }
-    }
 
-    loadSong()
+      if (cancelled) return
 
-    return () => {
-      cancelled = true
+      audio.src = src
+      audio.volume = volume
+      audio.load()
+
+      if (isPlaying) {
+        await audio.play()
+      }
+    } catch (error) {
+      console.error("Playback failed:", error)
+      setIsPlaying(false)
     }
-  }, [currentSongIndex, driveSongs])
+  }
+
+  loadSong()
+
+  return () => {
+    cancelled = true
+  }
+}, [currentSongIndex, driveSongs])
 
   // -----------------------------
   // AUDIO EVENTS
