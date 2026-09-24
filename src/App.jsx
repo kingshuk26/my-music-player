@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { openDB } from "idb"
+
 import { useGoogleLogin } from "@react-oauth/google"
 import {
   Play,
@@ -44,10 +45,13 @@ const MUSIC_DB_NAME = "my-music-player"
 const MUSIC_STORE_NAME = "songs"
 
 const getMusicDB = () =>
-  openDB(MUSIC_DB_NAME, 1, {
+  openDB(MUSIC_DB_NAME, 2, {
     upgrade(db) {
       if (!db.objectStoreNames.contains(MUSIC_STORE_NAME)) {
         db.createObjectStore(MUSIC_STORE_NAME)
+      }
+      if (!db.objectStoreNames.contains("likedSongs")) {
+        db.createObjectStore("likedSongs")
       }
     },
   })
@@ -71,7 +75,7 @@ function App() {
   const [selectedFolder, setSelectedFolder] = useState(null)
   const [loadingDrive, setLoadingDrive] = useState(false)
   const [driveError, setDriveError] = useState("")
-
+  const [activeTab, setActiveTab] = useState("home")
   const [currentSongIndex, setCurrentSongIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -79,11 +83,38 @@ function App() {
   const [volume, setVolume] = useState(0.8)
   const [isShuffle, setIsShuffle] = useState(false)
   const [isRepeat, setIsRepeat] = useState(false)
+  const [likedSongs, setLikedSongs] = useState([])
   const [search, setSearch] = useState("")
 
-  const songs = accessToken ? driveSongs : localSongs
+  const songs = activeTab === "liked"
+  ? likedSongs
+  : accessToken
+    ? driveSongs
+    : localSongs
   const currentSong = songs[currentSongIndex]
+  const [showGreeting, setShowGreeting] = useState(true)
+  const [greeting, setGreeting] = useState("Good Evening")
 
+useEffect(() => {
+  const hour = new Date().getHours()
+
+  if (hour >= 5 && hour < 12) {
+    setGreeting("Good Morning")
+  } else if (hour >= 12 && hour < 17) {
+    setGreeting("Good Afternoon")
+  } else if (hour >= 17 && hour < 21) {
+    setGreeting("Good Evening")
+  } else {
+    setGreeting("Good Night")
+  }
+}, [])
+useEffect(() => {
+  const timer = setTimeout(() => {
+    setShowGreeting(false)
+  }, 1800)
+
+  return () => clearTimeout(timer)
+}, [])
   // -----------------------------
   // GOOGLE LOGIN
   // -----------------------------
@@ -160,6 +191,7 @@ function App() {
         const name = file.name.toLowerCase()
 
         return (
+          
           file.mimeType?.startsWith("audio/") ||
           name.endsWith(".mp3") ||
           name.endsWith(".m4a") ||
@@ -190,6 +222,16 @@ function App() {
 
   fetchDriveContent()
 }, [accessToken])
+useEffect(() => {
+  const loadLikedSongs = async () => {
+    const db = await getMusicDB()
+    const songs = await db.getAll("likedSongs")
+
+    setLikedSongs(songs)
+  }
+
+  loadLikedSongs()
+}, [])
 
 const fetchFolderSongs = async (folder) => {
   setLoadingDrive(true)
@@ -249,6 +291,28 @@ const fetchFolderSongs = async (folder) => {
   // -----------------------------
   // DOWNLOAD / PLAY DRIVE SONG
   // -----------------------------
+  const toggleLike = async (song) => {
+  const db = await getMusicDB()
+
+  const isLiked = likedSongs.some(
+    (liked) => liked.id === song.id
+  )
+
+  if (isLiked) {
+    await db.delete("likedSongs", song.id)
+
+    setLikedSongs((prev) =>
+      prev.filter((liked) => liked.id !== song.id)
+    )
+  } else {
+    await db.put("likedSongs", song, song.id)
+
+    setLikedSongs((prev) => [
+      ...prev,
+      song,
+    ])
+  }
+}
 
   const getDriveAudioUrl = async (song) => {
   const db = await getMusicDB()
@@ -477,7 +541,23 @@ const fetchFolderSongs = async (folder) => {
   }, [])
 
   return (
-    <div className="min-h-screen w-full overflow-x-hidden bg-black text-white">
+    <>
+    {showGreeting ? (
+      <div className="flex min-h-screen items-center justify-center bg-black text-white">
+        <div className="text-center">
+          <div className="mb-4 text-5xl">🎵</div>
+
+          <h1 className="text-2xl font-bold">
+            {greeting}, Kingshuk 👋
+          </h1>
+
+          <p className="mt-2 text-sm text-zinc-500">
+            Welcome back to your music
+          </p>
+        </div>
+      </div>
+    ) : (
+      <div className="min-h-screen w-full overflow-x-hidden bg-black text-white">
       <audio ref={audioRef} />
 
       <main className="mx-auto w-full min-w-0 max-w-md px-4 pb-40">
@@ -645,19 +725,46 @@ const fetchFolderSongs = async (folder) => {
                       <Music2 size={42} className="text-zinc-400" />
                     </div>
 
-                    <p className="truncate font-semibold">
-                      {song.title}
-                    </p>
+                    <div className="flex items-center gap-2">
+  <p className="min-w-0 flex-1 truncate font-semibold">
+    {song.title}
+  </p>
 
-                    <p className="truncate text-xs text-zinc-500">
-                      {song.artist}
-                    </p>
+  <button
+    onClick={(e) => {
+      e.stopPropagation()
+      toggleLike(song)
+    }}
+    className="shrink-0"
+  >
+    <span
+  onClick={(e) => {
+    e.stopPropagation()
+    toggleLike(song)
+  }}
+  className={`shrink-0 cursor-pointer ${
+    likedSongs.some((liked) => liked.id === song.id)
+      ? "text-red-500"
+      : "text-zinc-500"
+  }`}
+>
+  ♥
+</span>
+  </button>
+</div>
+
+<p className="truncate text-xs text-zinc-500">
+  {song.artist}
+</p>
                   </button>
                 )
               })}
             </div>
           )}
         </section>
+        
+
+
 
         {/* NOW PLAYING */}
 
@@ -812,29 +919,37 @@ const fetchFolderSongs = async (folder) => {
 
       <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-zinc-900 bg-black/95">
         <div className="mx-auto flex max-w-md items-center justify-around py-3 text-xs text-zinc-400">
-          <div className="flex flex-col items-center gap-1 text-white">
+          <button
+            onClick={() => setActiveTab("home")}
+            className="flex flex-col items-center gap-1"
+          >
             <Music2 size={20} />
             Home
-          </div>
+          </button>
 
           <div className="flex flex-col items-center gap-1">
             <Search size={20} />
             Search
           </div>
 
-          <div className="flex flex-col items-center gap-1">
+          <button
+            onClick={() => setActiveTab("liked")}
+            className="flex flex-col items-center gap-1"
+          >
             <Repeat size={20} />
             Liked
-          </div>
+          </button>
 
           <div className="flex flex-col items-center gap-1">
             <HardDrive size={20} />
             Library
           </div>
         </div>
-      </nav>
-    </div>
-  )
+            </nav>
+      </div>
+    )}
+  </>
+)
 }
 
 export default App
