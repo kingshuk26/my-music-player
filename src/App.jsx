@@ -119,19 +119,20 @@ useEffect(() => {
   // GOOGLE LOGIN
   // -----------------------------
 
-  const login = useGoogleLogin({
-    scope: "https://www.googleapis.com/auth/drive.readonly",
+ const login = useGoogleLogin({
+  scope: "https://www.googleapis.com/auth/drive.readonly",
+  prompt: "select_account",
 
-    onSuccess: (tokenResponse) => {
-      console.log("Google login successful")
-      setAccessToken(tokenResponse.access_token)
-      setDriveError("")
-    },
+  onSuccess: (tokenResponse) => {
+    console.log("Google login successful")
+    setAccessToken(tokenResponse.access_token)
+    setDriveError("")
+  },
 
-    onError: () => {
-      setDriveError("Google login failed")
-    },
-  })
+  onError: () => {
+    setDriveError("Google login failed")
+  },
+})
 
   // -----------------------------
   // FETCH SONGS FROM GOOGLE DRIVE
